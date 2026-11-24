@@ -146,10 +146,12 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
       }
       closeSync(logFd)
     } else {
+      // Linux: write markers via redirections (no fd handoff), wait for pid death, swap,
+      // then close every inherited fd before a detached clean relaunch — otherwise the
+      // dying app's CDP listener fd survives exec and the new instance fails EADDRINUSE.
       const logPath = join(dirname(asarPath), 'update-log.txt')
-      const logFd = openSync(logPath, 'a')
-      const script = `echo "swap start \\$(date -Iseconds)"; while kill -0 ${pid} 2>/dev/null; do sleep 0.4; done; sleep 0.5; mv -f '${stage}' '${asarPath}' && echo 'swap applied' && exec '${exe}'${argsStr} || echo 'SWAP-FAILED'`
-      child = spawn('/bin/sh', ['-c', script], { detached: true, stdio: ['ignore', logFd, logFd] })
+      const script = `echo "swap start \\$(date -Iseconds)" >> '${logPath}'; while kill -0 ${pid} 2>/dev/null; do sleep 0.4; done; sleep 0.5; mv -f '${stage}' '${asarPath}' && echo 'swap applied' >> '${logPath}' || { echo 'SWAP-FAILED' >> '${logPath}'; exit 1; }; for fd in \\$(ls /proc/self/fd 2>/dev/null); do [ "\\$fd" -gt 2 ] && eval "exec \\$fd>&-" 2>/dev/null; done; setsid '${exe}'${argsStr} </dev/null >/dev/null 2>&1 & echo 'relaunched' >> '${logPath}'`
+      child = spawn('/bin/sh', ['-c', script], { detached: true, stdio: 'ignore' })
     }
     child.unref()
     statSync(stage)
