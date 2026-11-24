@@ -2,7 +2,8 @@
 // Zero-dependency and auth-less: every device updates itself from its own public GitHub repo.
 import { app, BrowserWindow } from 'electron'
 import { spawn } from 'child_process'
-import { renameSync, statSync, writeFileSync } from 'fs'
+import { openSync, renameSync, statSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 import type { Writable } from 'stream'
 
 const REPO = 'VulkTek/eulers-harness'
@@ -84,13 +85,15 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
     const args = process.argv.slice(1).filter(a => a.length > 0)
     const argsStr = args.length > 0 ? ' ' + args.map(a => `'${a}'`).join(' ') : ''
     let child
+    const logPath = join(dirname(asarPath), 'update-log.txt')
+    const logFd = openSync(logPath, 'a')
     if (process.platform === 'win32') {
       const psArgs = args.length > 0 ? " -ArgumentList @('" + args.join("','") + "')" : ''
-      const script = `Wait-Process -Id ${pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Remove-Item -Force -LiteralPath '${asarPath}' -ErrorAction SilentlyContinue; Move-Item -Force -LiteralPath '${stage}' -Destination '${asarPath}' -ErrorAction Stop; for ($i = 0; $i -lt 3; $i++) { Start-Process -FilePath '${exe}'${psArgs}; Start-Sleep -Seconds 2; $p = Get-Process -Name '${process.platform === 'win32' ? 'Eulers Harness' : 'eulers-harness'}' -ErrorAction SilentlyContinue; if ($p) { break } }`
-      child = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], { detached: true, stdio: 'ignore', windowsHide: true })
+      const script = `$ErrorActionPreference='Continue'; try { Write-Output ('swap start ' + (Get-Date -Format o)); Wait-Process -Id ${pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Remove-Item -Force -LiteralPath '${asarPath}' -ErrorAction SilentlyContinue; Move-Item -Force -LiteralPath '${stage}' -Destination '${asarPath}' -ErrorAction Stop; for ($i = 0; $i -lt 3; $i++) { Start-Process -FilePath '${exe}'${psArgs}; Start-Sleep -Seconds 2; $p = Get-Process -Name 'Eulers Harness' -ErrorAction SilentlyContinue; if ($p) { Write-Output ('relaunched attempt ' + $i); break } } ; Write-Output 'swap done' } catch { Write-Output ('SWAP-FAIL: ' + $_.Exception.Message) }`
+      child = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true })
     } else {
-      const script = `while kill -0 ${pid} 2>/dev/null; do sleep 0.4; done; sleep 0.5; mv -f '${stage}' '${asarPath}' && exec '${exe}'${argsStr}`
-      child = spawn('/bin/sh', ['-c', script], { detached: true, stdio: 'ignore' })
+      const script = `echo "swap start \\$(date -Iseconds)"; while kill -0 ${pid} 2>/dev/null; do sleep 0.4; done; sleep 0.5; mv -f '${stage}' '${asarPath}' && echo 'swap applied' && exec '${exe}'${argsStr} || echo 'SWAP-FAILED'`
+      child = spawn('/bin/sh', ['-c', script], { detached: true, stdio: ['ignore', logFd, logFd] })
     }
     child.unref()
     statSync(stage)
