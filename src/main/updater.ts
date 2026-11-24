@@ -86,7 +86,7 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
     let child
     if (process.platform === 'win32') {
       const psArgs = args.length > 0 ? " -ArgumentList @('" + args.join("','") + "')" : ''
-      const script = `Wait-Process -Id ${pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Move-Item -Force -LiteralPath '${stage}' -Destination '${asarPath}'; Start-Process -FilePath '${exe}'${psArgs}`
+      const script = `Wait-Process -Id ${pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Remove-Item -Force -LiteralPath '${asarPath}' -ErrorAction SilentlyContinue; Move-Item -Force -LiteralPath '${stage}' -Destination '${asarPath}' -ErrorAction Stop; Start-Process -FilePath '${exe}'${psArgs}`
       child = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], { detached: true, stdio: 'ignore', windowsHide: true })
     } else {
       const script = `while kill -0 ${pid} 2>/dev/null; do sleep 0.4; done; sleep 0.5; mv -f '${stage}' '${asarPath}' && exec '${exe}'${argsStr}`
