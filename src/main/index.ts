@@ -8,7 +8,7 @@ import { SessionStore } from './sessions'
 import { ConfigManager } from './config'
 import { indexDocsDir, ragStatus } from './rag-indexer'
 import * as fsNode from 'fs'
-import { checkForUpdate, applyUpdate } from './updater'
+import { checkForUpdate, applyUpdate, ensureLaunchTask } from './updater'
 import { ensureLocalOllama, isLocalOllamaUrl } from './ollama-serve'
 
 const isDev = !app.isPackaged
@@ -393,6 +393,7 @@ function wireIpc(): void {
 app.whenReady().then(async () => {
   wireIpc()
   await init()
+  ensureLaunchTask()
 }).catch(err => {
   console.error('[main] init failed:', err)
   app.quit()

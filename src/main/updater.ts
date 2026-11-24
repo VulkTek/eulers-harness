@@ -31,6 +31,20 @@ const send = (win: BrowserWindow | undefined, channel: string, payload: unknown)
   try { win?.webContents.send(channel, payload) } catch { /* window may be closing */ }
 }
 
+// Ensure the Windows relaunch Scheduled Task exists (created once on first launch).
+// Every device self-registers, so a fresh install is drop-and-go: the update swapper
+// can always relaunch via this task. Linux needs no task (the swapper execs directly).
+export function ensureLaunchTask(): void {
+  if (process.platform !== 'win32' || !app.isPackaged) return
+  try {
+    const q = spawnSync('schtasks', ['/Query', '/TN', 'EulerStart'], { stdio: 'ignore' })
+    if (q.status === 0) return
+    const args = process.argv.slice(1).map(a => `"${a}"`).join(' ')
+    const tr = `"${process.execPath}"` + (args ? ' ' + args : '')
+    spawnSync('schtasks', ['/Create', '/TN', 'EulerStart', '/SC', 'ONCE', '/ST', '23:59', '/F', '/TR', tr], { stdio: 'ignore' })
+  } catch { /* non-fatal: the swapper falls back to a direct start */ }
+}
+
 export async function checkForUpdate(): Promise<UpdateCheck> {
   const current = app.getVersion()
   if (!app.isPackaged) return { current, latest: null, updateAvailable: false, assetUrl: null, dev: true }
@@ -102,6 +116,8 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
         `move /y "${stage}" "${asarPath}"`,
         `echo swap applied ${L}`,
         `schtasks /run /tn "EulerStart" >nul 2>&1`,
+        `echo relaunch-rc:%ERRORLEVEL% ${L}`,
+        `if errorlevel 1 start "" "${exe}" >nul 2>&1`,
         `schtasks /delete /tn "EulerSwap" /f >nul 2>&1`,
         `echo swap done ${L}`
       ].join('\r\n') + '\r\n')
