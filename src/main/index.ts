@@ -9,6 +9,7 @@ import { ConfigManager } from './config'
 import { indexDocsDir, ragStatus } from './rag-indexer'
 import * as fsNode from 'fs'
 import { checkForUpdate, applyUpdate } from './updater'
+import { ensureLocalOllama, isLocalOllamaUrl } from './ollama-serve'
 
 const isDev = !app.isPackaged
 const EULER_DIR = process.env.EULER_HOME ?? join(app.getPath('home'), '.euler')
@@ -235,6 +236,10 @@ function wireIpc(): void {
       const { unlinkSync } = await import('fs')
       try { unlinkSync(modelsPath) } catch {}
     }
+    // grab the local ollama serve before rebuilding the agent session (starts one if none is running)
+    if (cfg.provider === 'ollama') {
+      await ensureLocalOllama(cfg.ollamaUrl ?? 'http://127.0.0.1:11434')
+    }
     if (piHost) {
       piHost.dispose()
     }
@@ -315,6 +320,11 @@ function wireIpc(): void {
   ipcMain.handle('models:discover', async () => {
     const cfg = configManager.load()
     const ollamaBase = (cfg.ollamaUrl || 'http://127.0.0.1:11434').replace(/\/+$/, '')
+    // grabbing the local ollama serve: probe, and if nothing is listening spawn `ollama serve` and wait
+    if (isLocalOllamaUrl(ollamaBase)) {
+      const first = await probeOllamaDetailed(ollamaBase)
+      if (first.length === 0) await ensureLocalOllama(ollamaBase)
+    }
     type Source = { source: string; kind: string; baseUrl: string; host: string; models: Array<{ id: string; sizeGb?: number }> }
     const jobs: Array<Promise<Source | null>> = [
       probeOllamaDetailed(ollamaBase).then(models => models.length > 0
