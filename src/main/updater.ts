@@ -108,6 +108,9 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
       const logPath = join(resDir, 'update-log.txt')
       const swapScript = join(resDir, 'swap.cmd')
       const exeName = basename(exe)
+      // Unique per-apply name: scheduled-task /Create is denied for an existing name when
+      // called from inside a task session, so every apply registers a fresh task.
+      const swapTaskName = 'EulerSwap' + Date.now()
       const L = `>> "${logPath}"`
       writeFileSync(swapScript, [
         '@echo off',
@@ -119,30 +122,26 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
         `schtasks /run /tn "EulerStart" >nul 2>&1`,
         `echo relaunch-rc:%ERRORLEVEL% ${L}`,
         `if errorlevel 1 start "" "${exe}"${argsStrC} >nul 2>&1`,
-        `schtasks /delete /tn "EulerSwap" /f >nul 2>&1`,
+        `schtasks /delete /tn "${swapTaskName}" /f >nul 2>&1`,
         `echo swap done ${L}`
       ].join('\r\n') + '\r\n')
       // fd stdio is safe here: spawnSync blocks, no detached flag involved.
       const logFd = openSync(logPath, 'a')
       const logLine = (s: string): void => { try { writeSync(logFd, s + '\n') } catch { /* best effort */ } }
-      const created = spawnSync('schtasks', ['/Create', '/TN', 'EulerSwap', '/SC', 'ONCE', '/ST', '00:00', '/F', '/TR', swapScript], { stdio: ['ignore', logFd, logFd] })
+      const created = spawnSync('schtasks', ['/Create', '/TN', swapTaskName, '/SC', 'ONCE', '/ST', '00:00', '/F', '/TR', swapScript], { stdio: ['ignore', logFd, logFd] })
       logLine('sched-create rc:' + String(created.status) + (created.error ? ' err:' + String(created.error).slice(0, 120) : ''))
       let scheduledOk = created.status === 0
       if (scheduledOk) {
-        const ran = spawnSync('schtasks', ['/Run', '/TN', 'EulerSwap'], { stdio: ['ignore', logFd, logFd] })
+        const ran = spawnSync('schtasks', ['/Run', '/TN', swapTaskName], { stdio: ['ignore', logFd, logFd] })
         logLine('sched-run rc:' + String(ran.status))
         scheduledOk = ran.status === 0
       }
-      if (scheduledOk) {
-        // fire-and-forget noop keeps the child bookkeeping identical to the linux path
-        child = spawn('cmd.exe', ['/c', 'echo noop'], { detached: true, stdio: 'ignore', windowsHide: true })
-      } else {
+      child = spawn('cmd.exe', ['/c', 'echo noop'], { detached: true, stdio: 'ignore', windowsHide: true })
+      if (!scheduledOk) {
         // fallback: direct detached swapper, self-logging, best effort before app exit
         const logQ = logPath.replace(/"/g, '')
         const direct = `echo fb-swap start >> "${logQ}" & ping -n 2 127.0.0.1 >nul & move /y "${stage}" "${asarPath}" >> "${logQ}" 2>&1 & echo fb-swap applied >> "${logQ}" & start "" "${exe}"${argsStrC} & echo fb-swap done >> "${logQ}"`
         logLine('falling back to direct spawn')
-        child = spawn('cmd.exe', ['/c', direct], { detached: true, stdio: 'ignore', windowsHide: true })
-        return { started: true }
       }
       closeSync(logFd)
     } else {
