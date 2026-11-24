@@ -64,4 +64,20 @@ const up = await fetch(`https://uploads.github.com/repos/${slug}/releases/${relJ
   body: asar
 })
 if (!up.ok) throw new Error('asset upload failed: ' + up.status + ' ' + (await up.text()).slice(0, 200))
+// 5. wait until the PUBLIC unauthenticated /releases/latest actually reports this tag
+// (api.github.com can briefly serve a cached previous "latest"; the app's update chip reads exactly this endpoint,
+// so a fresh publish must be visible before we declare success)
+const H0 = { 'User-Agent': 'eulers-harness-publish' }
+let seenTag = ''
+for (let i = 0; i < 20; i++) {
+  const pub = await fetch(`https://api.github.com/repos/${slug}/releases/latest`, { headers: H0 })
+  if (pub.ok) {
+    const j = await pub.json()
+    seenTag = j.tag_name
+    if (seenTag === TAG) break
+  }
+  await new Promise(r => setTimeout(r, 2000))
+}
+if (seenTag !== TAG) throw new Error(`public /releases/latest still reports ${seenTag || 'nothing'} after 40s`)
+console.log('public latest confirmed:', seenTag)
 console.log(`published ${TAG} (${(asar.length / 1024 / 1024).toFixed(1)} MB) - https://github.com/${slug}/releases/tag/${TAG}`)
