@@ -1,9 +1,9 @@
 // Euler's Harness self-updater: compare + fetch euler-app.asar from GitHub releases, staged swap, relaunch.
 // Zero-dependency and auth-less: every device updates itself from its own public GitHub repo.
 import { app, BrowserWindow } from 'electron'
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { openSync, renameSync, statSync, writeFileSync } from 'fs'
-import { dirname, join } from 'path'
+import { basename, dirname, join } from 'path'
 import type { Writable } from 'stream'
 
 const REPO = 'VulkTek/eulers-harness'
@@ -86,13 +86,32 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
     const argsStr = args.length > 0 ? ' ' + args.map(a => `'${a}'`).join(' ') : ''
     let child
     if (process.platform === 'win32') {
-      const argsStrC = args.length > 0 ? ' ' + args.map(a => `"${a}"`).join(' ') : ''
-      const logPath = join(dirname(asarPath), 'update-log.txt')
-      // cmd.exe, not powershell: powershell.exe cold-starts slowly (Defender scans it), and
-      // app.exit() fires at +400ms — the spawn can be cancelled before CreateProcess completes.
-      const logQ = logPath.replace(/"/g, '\\"')
-      const script = `echo swap start >> "${logQ}" & ping -n 2 127.0.0.1 >nul & move /y "${stage}" "${asarPath}" >nul 2>&1 & echo swap applied >> "${logQ}" & start "" "${exe}"${argsStrC} & echo swap done >> "${logQ}"`
-      child = spawn('cmd.exe', ['/c', script], { detached: true, stdio: 'ignore', windowsHide: true })
+      // No spawn-then-exit race: the app is killed by the swap task itself, the swap runs
+      // inside Task Scheduler's own session (independent of the app's lifetime), and the
+      // relaunch goes through the existing EulerStart task.
+      const resDir = dirname(asarPath)
+      const logPath = join(resDir, 'update-log.txt')
+      const swapScript = join(resDir, 'swap.cmd')
+      const exeName = basename(exe)
+      const L = `>> "${logPath}"`
+      writeFileSync(swapScript, [
+        '@echo off',
+        `echo swap start ${L}`,
+        `taskkill /F /IM "${exeName}" >nul 2>&1`,
+        'ping -n 2 127.0.0.1 >nul',
+        `move /y "${stage}" "${asarPath}"`,
+        `echo swap applied ${L}`,
+        `schtasks /run /tn "EulerStart" >nul 2>&1`,
+        `schtasks /delete /tn "EulerSwap" /f >nul 2>&1`,
+        `echo swap done ${L}`
+      ].join('\r\n') + '\r\n')
+      const created = spawnSync('schtasks', ['/Create', '/TN', 'EulerSwap', '/SC', 'ONCE', '/ST', '00:00', '/F', '/TR', swapScript], { stdio: 'ignore' })
+      if (created.status !== 0) {
+        send(win, 'updater:done', { relaunching: false, error: 'could not schedule swap task' })
+        return { started: false, error: 'could not schedule swap task' }
+      }
+      spawnSync('schtasks', ['/Run', '/TN', 'EulerSwap'], { stdio: 'ignore' })
+      child = spawn('cmd.exe', ['/c', 'echo noop'], { detached: true, stdio: 'ignore', windowsHide: true })
     } else {
       const logPath = join(dirname(asarPath), 'update-log.txt')
       const logFd = openSync(logPath, 'a')
