@@ -238,7 +238,9 @@ function wireIpc(): void {
     if (piHost) {
       piHost.dispose()
     }
-    piHost = new PiHost(EULER_DIR, AGENT_DIR, sessionStore!, cfg.workspaceDir)
+    // piHost.dispose() closes the shared SessionStore sqlite handle; reopen so the fresh PiHost has a live db.
+    sessionStore = new SessionStore(EULER_DIR)
+    piHost = new PiHost(EULER_DIR, AGENT_DIR, sessionStore, cfg.workspaceDir)
     wireUiBridge(piHost)
     piHost.setBroadcast(broadcast)
     const ready = await piHost.init({ ...cfg, apiKeySet: patch.apiKey !== undefined ? patch.apiKey !== '' : keySet })
