@@ -86,13 +86,13 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
     const argsStr = args.length > 0 ? ' ' + args.map(a => `'${a}'`).join(' ') : ''
     let child
     if (process.platform === 'win32') {
-      const psArgs = args.length > 0 ? " -ArgumentList @('" + args.join("','") + "')" : ''
+      const argsStrC = args.length > 0 ? ' ' + args.map(a => `"${a}"`).join(' ') : ''
       const logPath = join(dirname(asarPath), 'update-log.txt')
-      // NOTE: on Windows, passing file-fd stdio into a detached spawn silently prevents
-      // the child from starting at all; PowerShell writes its own log via Add-Content instead.
-      const psLog = logPath.replace(/'/g, "''")
-      const script = `$ErrorActionPreference='Continue'; function L($t) { Add-Content -LiteralPath '${psLog}' -Value $t }; try { L ('swap start ' + (Get-Date -Format o)); Wait-Process -Id ${pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Remove-Item -Force -LiteralPath '${asarPath}' -ErrorAction SilentlyContinue; Move-Item -Force -LiteralPath '${stage}' -Destination '${asarPath}' -ErrorAction Stop; L 'swap applied'; for ($i = 0; $i -lt 3; $i++) { Start-Process -FilePath '${exe}'${psArgs}; Start-Sleep -Seconds 2; $p = Get-Process -Name 'Eulers Harness' -ErrorAction SilentlyContinue; if ($p) { L ('relaunched attempt ' + $i); break } } ; L 'swap done' } catch { L ('SWAP-FAIL: ' + $_.Exception.Message) }`
-      child = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], { detached: true, stdio: 'ignore', windowsHide: true })
+      // cmd.exe, not powershell: powershell.exe cold-starts slowly (Defender scans it), and
+      // app.exit() fires at +400ms — the spawn can be cancelled before CreateProcess completes.
+      const logQ = logPath.replace(/"/g, '\\"')
+      const script = `echo swap start >> "${logQ}" & ping -n 2 127.0.0.1 >nul & move /y "${stage}" "${asarPath}" >nul 2>&1 & echo swap applied >> "${logQ}" & start "" "${exe}"${argsStrC} & echo swap done >> "${logQ}"`
+      child = spawn('cmd.exe', ['/c', script], { detached: true, stdio: 'ignore', windowsHide: true })
     } else {
       const logPath = join(dirname(asarPath), 'update-log.txt')
       const logFd = openSync(logPath, 'a')
