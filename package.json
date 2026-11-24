@@ -1,6 +1,6 @@
 {
   "name": "eulers-harness",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Vulktek desktop agent harness powered by Pi SDK",
   "type": "module",
   "main": "./out/main/index.js",

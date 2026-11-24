@@ -65,3 +65,33 @@ export async function ensureLocalOllama(api: string, waitMs = 15000): Promise<{ 
   }
   return { ok: false, spawned: false, error: 'ollama executable not found — install ollama or point the endpoint somewhere else' }
 }
+
+// Warm a model: triggers the weights load so the next real prompt lands on an in-memory
+// model instead of paying cold-load latency. Uses ollama's default keep_alive (5 min).
+// Works for local and remote ollama alike; harmless one-token generation.
+export async function warmOllamaModel(api: string, modelId: string): Promise<boolean> {
+  const base = (api ?? '').replace(/\/+$/, '')
+  if (!modelId) return false
+  try {
+    const r = await fetch(base + '/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'eulers-harness' },
+      body: JSON.stringify({ model: modelId, prompt: 'ready?', stream: false, options: { num_predict: 1 } }),
+      signal: AbortSignal.timeout(120000)
+    })
+    return r.ok
+  } catch { return false }
+}
+
+// One call for "the app is about to use this model": make sure a local serve is up,
+// then load the model. Local URLs get serve-started; remote URLs just get warmed.
+export async function ensureOllamaWithModel(api: string, modelId: string): Promise<void> {
+  const base = (api ?? '').replace(/\/+$/, '')
+  if (!modelId) return
+  if (isLocalOllamaUrl(base)) {
+    const r = await ensureLocalOllama(base)
+    if (r.ok) await warmOllamaModel(base, modelId)
+  } else {
+    await warmOllamaModel(base, modelId)
+  }
+}

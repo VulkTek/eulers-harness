@@ -9,7 +9,7 @@ import { ConfigManager } from './config'
 import { indexDocsDir, ragStatus } from './rag-indexer'
 import * as fsNode from 'fs'
 import { checkForUpdate, applyUpdate, ensureLaunchTask } from './updater'
-import { ensureLocalOllama, isLocalOllamaUrl } from './ollama-serve'
+import { ensureLocalOllama, isLocalOllamaUrl, warmOllamaModel } from './ollama-serve'
 
 const isDev = !app.isPackaged
 const EULER_DIR = process.env.EULER_HOME ?? join(app.getPath('home'), '.euler')
@@ -165,6 +165,16 @@ async function init(): Promise<void> {
   piHost.setBroadcast(broadcast)
   const ready = await piHost.init(config)
   if (!ready) console.error('[pihost] model init failed; check ollama/models')
+  // bring the configured provider's server and model up in the background (ollama only)
+  if (config.provider === 'ollama') {
+    if (isLocalOllamaUrl(config.ollamaUrl ?? 'http://127.0.0.1:11434')) {
+      void ensureLocalOllama(config.ollamaUrl ?? 'http://127.0.0.1:11434').then(r => {
+        if (r.ok && config.modelId) return warmOllamaModel(config.ollamaUrl ?? 'http://127.0.0.1:11434', config.modelId)
+      })
+    } else if (config.modelId) {
+      void warmOllamaModel(config.ollamaUrl ?? 'http://127.0.0.1:11434', config.modelId)
+    }
+  }
   createWindow()
 }
 
@@ -239,6 +249,8 @@ function wireIpc(): void {
     // grab the local ollama serve before rebuilding the agent session (starts one if none is running)
     if (cfg.provider === 'ollama') {
       await ensureLocalOllama(cfg.ollamaUrl ?? 'http://127.0.0.1:11434')
+      // spin the selected model up too: background weight-load so the next prompt is instant
+      void warmOllamaModel(cfg.ollamaUrl ?? 'http://127.0.0.1:11434', cfg.modelId ?? '')
     }
     if (piHost) {
       piHost.dispose()
