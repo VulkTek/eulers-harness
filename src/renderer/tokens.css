@@ -1,0 +1,25 @@
+
+
+/* Euler's Harness — amber/ash design tokens. Single source for GUI styling. */
+:root {
+  --bg-ash-deep: #4a4038;
+  --bg-ash: #55493f;
+  --bg-ash-raised: #63564b;
+  --bg-ash-hover: #716355;
+  --amber: #fbbf24;
+  --amber-bright: #fcd34d;
+  --amber-dim: #f59e0b;
+  --ember-glow: #fb923c;
+  --text-primary: #ffd280;
+  --text-secondary: #f3b866;
+  --text-dim: #d99a4e;
+  --border: #7d6f60;
+  --border-visible: #9c8b78;
+  --success: #a3e635;
+  --error: #ff9d9d;
+  --warning: #fcd34d;
+  --code-bg: #3a322a;
+  --radius: 8px;
+  --font-ui: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
+}
