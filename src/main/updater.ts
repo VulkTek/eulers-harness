@@ -85,13 +85,17 @@ export async function applyUpdate(win: BrowserWindow | undefined): Promise<{ sta
     const args = process.argv.slice(1).filter(a => a.length > 0)
     const argsStr = args.length > 0 ? ' ' + args.map(a => `'${a}'`).join(' ') : ''
     let child
-    const logPath = join(dirname(asarPath), 'update-log.txt')
-    const logFd = openSync(logPath, 'a')
     if (process.platform === 'win32') {
       const psArgs = args.length > 0 ? " -ArgumentList @('" + args.join("','") + "')" : ''
-      const script = `$ErrorActionPreference='Continue'; try { Write-Output ('swap start ' + (Get-Date -Format o)); Wait-Process -Id ${pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Remove-Item -Force -LiteralPath '${asarPath}' -ErrorAction SilentlyContinue; Move-Item -Force -LiteralPath '${stage}' -Destination '${asarPath}' -ErrorAction Stop; for ($i = 0; $i -lt 3; $i++) { Start-Process -FilePath '${exe}'${psArgs}; Start-Sleep -Seconds 2; $p = Get-Process -Name 'Eulers Harness' -ErrorAction SilentlyContinue; if ($p) { Write-Output ('relaunched attempt ' + $i); break } } ; Write-Output 'swap done' } catch { Write-Output ('SWAP-FAIL: ' + $_.Exception.Message) }`
-      child = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true })
+      const logPath = join(dirname(asarPath), 'update-log.txt')
+      // NOTE: on Windows, passing file-fd stdio into a detached spawn silently prevents
+      // the child from starting at all; PowerShell writes its own log via Add-Content instead.
+      const psLog = logPath.replace(/'/g, "''")
+      const script = `$ErrorActionPreference='Continue'; function L($t) { Add-Content -LiteralPath '${psLog}' -Value $t }; try { L ('swap start ' + (Get-Date -Format o)); Wait-Process -Id ${pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Remove-Item -Force -LiteralPath '${asarPath}' -ErrorAction SilentlyContinue; Move-Item -Force -LiteralPath '${stage}' -Destination '${asarPath}' -ErrorAction Stop; L 'swap applied'; for ($i = 0; $i -lt 3; $i++) { Start-Process -FilePath '${exe}'${psArgs}; Start-Sleep -Seconds 2; $p = Get-Process -Name 'Eulers Harness' -ErrorAction SilentlyContinue; if ($p) { L ('relaunched attempt ' + $i); break } } ; L 'swap done' } catch { L ('SWAP-FAIL: ' + $_.Exception.Message) }`
+      child = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], { detached: true, stdio: 'ignore', windowsHide: true })
     } else {
+      const logPath = join(dirname(asarPath), 'update-log.txt')
+      const logFd = openSync(logPath, 'a')
       const script = `echo "swap start \\$(date -Iseconds)"; while kill -0 ${pid} 2>/dev/null; do sleep 0.4; done; sleep 0.5; mv -f '${stage}' '${asarPath}' && echo 'swap applied' && exec '${exe}'${argsStr} || echo 'SWAP-FAILED'`
       child = spawn('/bin/sh', ['-c', script], { detached: true, stdio: ['ignore', logFd, logFd] })
     }
